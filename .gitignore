@@ -74,6 +74,11 @@ modules.builtin
 # git files that we don't want to ignore even if they are dot-files
 #
 !.gitignore
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/ak3/
+!.github/ak3/anykernel.sh
 !.mailmap
 !.cocciconfig
 

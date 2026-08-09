@@ -1,0 +1,207 @@
+name: Build Droidspaces AnyKernel3 package
+
+on:
+  push:
+    branches:
+      - droidspaces/crdroid-10.11-guacamole
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: droidspaces-ak3-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: guacamole / crDroid 10.11
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      CC: ccache clang
+      HOSTCC: clang
+      HOSTCXX: clang++
+      LD: ld.lld
+      AR: llvm-ar
+      NM: llvm-nm
+      OBJCOPY: llvm-objcopy
+      OBJDUMP: llvm-objdump
+      READELF: llvm-readelf
+      STRIP: llvm-strip
+      CLANG_TRIPLE: aarch64-linux-gnu-
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CROSS_COMPILE_ARM32: arm-linux-gnueabi-
+      LLVM_IAS: "1"
+      KBUILD_BUILD_USER: droidspaces
+      KBUILD_BUILD_HOST: github-actions
+      CLANG_REPOSITORY: https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r487747c.git
+      CLANG_COMMIT: 19f5a09ce1b016b21a6ead1ed5d84c816586ebb6
+      CLANG_DIR: ${{ github.workspace }}/.ci/clang-r487747c
+      AK3_REPOSITORY: https://github.com/classified/AnyKernel3.git
+      AK3_COMMIT: 9b319a806d36be2ea2eca8bad85bff0e03ce784f
+      AK3_DIR: ${{ github.workspace }}/.ci/AnyKernel3
+      OUT_DIR: ${{ github.workspace }}/out
+      ARTIFACT_DIR: ${{ github.workspace }}/artifacts
+      CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
+            bison build-essential ccache cpio device-tree-compiler file flex \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git libelf-dev \
+            libncurses-dev libssl-dev lz4 python-is-python3 python3 rsync \
+            unzip zip
+
+      - name: Restore locked crDroid Clang
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: crdroid-clang-${{ runner.os }}-${{ env.CLANG_COMMIT }}
+
+      - name: Fetch locked crDroid Clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$CLANG_DIR"
+          git init "$CLANG_DIR"
+          git -C "$CLANG_DIR" remote add origin "$CLANG_REPOSITORY"
+          git -C "$CLANG_DIR" fetch --depth=1 origin "$CLANG_COMMIT"
+          git -C "$CLANG_DIR" checkout --detach FETCH_HEAD
+
+      - name: Verify locked crDroid Clang
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_commit=$(git -C "$CLANG_DIR" rev-parse HEAD)
+          test "$actual_commit" = "$CLANG_COMMIT"
+          for tool in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy \
+            llvm-objdump llvm-readelf llvm-strip; do
+            test -x "$CLANG_DIR/bin/$tool"
+          done
+          echo "$CLANG_DIR/bin" >> "$GITHUB_PATH"
+          "$CLANG_DIR/bin/clang" --version
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: droidspaces-ccache-${{ runner.os }}-${{ hashFiles('arch/arm64/configs/lineage_sm8150_defconfig', 'kernel/cgroup/cgroup.c') }}
+          restore-keys: |
+            droidspaces-ccache-${{ runner.os }}-
+
+      - name: Prepare build directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR" "$ARTIFACT_DIR" "$CCACHE_DIR"
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      - name: Resolve and verify Droidspaces configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          make O="$OUT_DIR" lineage_sm8150_defconfig
+          make O="$OUT_DIR" olddefconfig
+          scripts/verify-droidspaces-config.sh "$OUT_DIR/.config"
+          cp "$OUT_DIR/.config" "$ARTIFACT_DIR/resolved.config"
+
+      - name: Build Image-dtb and modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs=$(nproc)
+          make O="$OUT_DIR" -j"$jobs" Image-dtb modules \
+            2>&1 | tee "$ARTIFACT_DIR/build.log"
+          image="$OUT_DIR/arch/arm64/boot/Image-dtb"
+          test -s "$image"
+          cp "$image" "$ARTIFACT_DIR/Image-dtb"
+          file "$image" | tee "$ARTIFACT_DIR/image-info.txt"
+          ccache --show-stats | tee "$ARTIFACT_DIR/ccache-stats.txt"
+
+      - name: Assemble guacamole AnyKernel3 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$AK3_DIR"
+          git init "$AK3_DIR"
+          git -C "$AK3_DIR" remote add origin "$AK3_REPOSITORY"
+          git -C "$AK3_DIR" fetch --depth=1 origin "$AK3_COMMIT"
+          git -C "$AK3_DIR" checkout --detach FETCH_HEAD
+          test "$(git -C "$AK3_DIR" rev-parse HEAD)" = "$AK3_COMMIT"
+
+          find "$AK3_DIR" -maxdepth 1 -type f \
+            \( -name 'Image*' -o -name 'zImage*' -o -name 'dtb*' -o -name 'dtbo*' \) \
+            -delete
+          cp .github/ak3/anykernel.sh "$AK3_DIR/anykernel.sh"
+          cp "$OUT_DIR/arch/arm64/boot/Image-dtb" "$AK3_DIR/Image-dtb"
+          chmod 0755 "$AK3_DIR/anykernel.sh"
+          rm -rf "$AK3_DIR/.git"
+
+          short_sha=${GITHUB_SHA:0:12}
+          zip_path="$ARTIFACT_DIR/Droidspaces-guacamole-crDroid-10.11-$short_sha.zip"
+          (
+            cd "$AK3_DIR"
+            zip -r9 "$zip_path" . -x 'README.md' '*.zip'
+          )
+
+          unzip -Z1 "$zip_path" | grep -Fqx 'Image-dtb'
+          unzip -Z1 "$zip_path" | grep -Fqx 'anykernel.sh'
+          unzip -Z1 "$zip_path" | grep -Fqx 'tools/ak3-core.sh'
+
+      - name: Record provenance and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "kernel_commit=$GITHUB_SHA"
+            echo "kernel_defconfig=lineage_sm8150_defconfig"
+            echo "kernel_image=Image-dtb"
+            echo "clang_repository=$CLANG_REPOSITORY"
+            echo "clang_commit=$CLANG_COMMIT"
+            echo "anykernel3_repository=$AK3_REPOSITORY"
+            echo "anykernel3_commit=$AK3_COMMIT"
+            "$CLANG_DIR/bin/clang" --version | head -n 1
+          } > "$ARTIFACT_DIR/build-provenance.txt"
+          (
+            cd "$ARTIFACT_DIR"
+            sha256sum Image-dtb resolved.config *.zip > SHA256SUMS
+          )
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidspaces-guacamole-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true
+          path: ${{ env.ARTIFACT_DIR }}
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidspaces-guacamole-diagnostics-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 14
+          include-hidden-files: true
+          path: |
+            ${{ env.OUT_DIR }}/.config
+            ${{ env.ARTIFACT_DIR }}/build.log
+            ${{ env.ARTIFACT_DIR }}/resolved.config

@@ -1,0 +1,89 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -ne 1 ]; then
+	echo "usage: $0 PATH_TO_DOT_CONFIG" >&2
+	exit 2
+fi
+
+config_file=$1
+
+if [ ! -f "$config_file" ]; then
+	echo "resolved kernel config not found: $config_file" >&2
+	exit 2
+fi
+
+# Check the resolved .config, not only the defconfig source. Several entries
+# below are selected indirectly by Kconfig dependencies on this Linux 4.14
+# tree and therefore do not have to appear literally in the defconfig.
+required_symbols='
+CONFIG_SYSVIPC
+CONFIG_POSIX_MQUEUE
+CONFIG_NAMESPACES
+CONFIG_PID_NS
+CONFIG_UTS_NS
+CONFIG_IPC_NS
+CONFIG_NET_NS
+CONFIG_SECCOMP
+CONFIG_SECCOMP_FILTER
+CONFIG_CGROUPS
+CONFIG_CGROUP_DEVICE
+CONFIG_CGROUP_PIDS
+CONFIG_MEMCG
+CONFIG_CGROUP_SCHED
+CONFIG_FAIR_GROUP_SCHED
+CONFIG_CGROUP_FREEZER
+CONFIG_CGROUP_NET_PRIO
+CONFIG_DEVTMPFS
+CONFIG_OVERLAY_FS
+CONFIG_TMPFS
+CONFIG_TMPFS_POSIX_ACL
+CONFIG_TMPFS_XATTR
+CONFIG_VETH
+CONFIG_BRIDGE
+CONFIG_BRIDGE_NETFILTER
+CONFIG_NETFILTER
+CONFIG_NETFILTER_ADVANCED
+CONFIG_NF_CONNTRACK
+CONFIG_NF_CT_NETLINK
+CONFIG_IP_NF_IPTABLES
+CONFIG_IP_NF_FILTER
+CONFIG_NF_NAT
+CONFIG_NF_NAT_REDIRECT
+CONFIG_NF_NAT_IPV4
+CONFIG_NF_TABLES
+CONFIG_IP_NF_NAT
+CONFIG_IP_NF_TARGET_MASQUERADE
+CONFIG_IP_NF_TARGET_REDIRECT
+CONFIG_NETFILTER_XT_TARGET_TCPMSS
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE
+CONFIG_IP_ADVANCED_ROUTER
+CONFIG_IP_MULTIPLE_TABLES
+CONFIG_NF_CONNTRACK_IPV4
+'
+
+failed=0
+checked=0
+
+for symbol in $required_symbols; do
+	checked=$((checked + 1))
+	if grep -Fqx "$symbol=y" "$config_file"; then
+		continue
+	fi
+
+	actual=$(grep -E "^${symbol}=|^# ${symbol} is not set$" "$config_file" || true)
+	if [ -z "$actual" ]; then
+		actual='<missing>'
+	fi
+	printf 'required config mismatch: expected %s=y, got %s\n' \
+		"$symbol" "$actual" >&2
+	failed=1
+done
+
+if [ "$failed" -ne 0 ]; then
+	echo "Droidspaces kernel configuration verification failed" >&2
+	exit 1
+fi
+
+echo "Droidspaces kernel configuration verified: $checked required symbols are built in"
