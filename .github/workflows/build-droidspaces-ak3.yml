@@ -48,6 +48,8 @@ jobs:
       OUT_DIR: ${{ github.workspace }}/out
       ARTIFACT_DIR: ${{ github.workspace }}/artifacts
       CCACHE_DIR: ${{ github.workspace }}/.ci/ccache
+      MODULES_STAGING: ${{ github.workspace }}/modules-staging
+      MODULES_PACKAGE: ${{ github.workspace }}/module-package
 
     steps:
       - name: Checkout kernel source
@@ -64,7 +66,7 @@ jobs:
             bc binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
             bison build-essential ccache cpio device-tree-compiler file flex \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git libelf-dev \
-            libncurses-dev libssl-dev lz4 python-is-python3 python3 rsync \
+            kmod libncurses-dev libssl-dev lz4 python-is-python3 python3 rsync \
             unzip zip
 
       - name: Restore locked crDroid Clang
@@ -102,14 +104,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: droidspaces-ccache-${{ runner.os }}-${{ hashFiles('arch/arm64/configs/lineage_sm8150_defconfig', 'kernel/cgroup/cgroup.c') }}
+          key: droidspaces-ccache-${{ runner.os }}-${{ env.CLANG_COMMIT }}-${{ hashFiles('arch/arm64/configs/lineage_sm8150_defconfig', 'kernel/cgroup/cgroup.c') }}
           restore-keys: |
-            droidspaces-ccache-${{ runner.os }}-
+            droidspaces-ccache-${{ runner.os }}-${{ env.CLANG_COMMIT }}-
 
       - name: Prepare build directories
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf "$MODULES_STAGING" "$MODULES_PACKAGE"
           mkdir -p "$OUT_DIR" "$ARTIFACT_DIR" "$CCACHE_DIR"
           ccache --max-size=2G
           ccache --zero-stats
@@ -136,6 +139,83 @@ jobs:
           file "$image" | tee "$ARTIFACT_DIR/image-info.txt"
           ccache --show-stats | tee "$ARTIFACT_DIR/ccache-stats.txt"
 
+      - name: Install and verify matching signed modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          make O="$OUT_DIR" CC="$CC" \
+            INSTALL_MOD_PATH="$MODULES_STAGING" INSTALL_MOD_STRIP=1 \
+            modules_install 2>&1 | tee "$ARTIFACT_DIR/modules-install.log"
+
+          kernel_release=$(make O="$OUT_DIR" CC="$CC" -s kernelrelease)
+          test -n "$kernel_release"
+          printf '%s\n' "$kernel_release" > "$ARTIFACT_DIR/kernel-release.txt"
+
+          installed_root="$MODULES_STAGING/lib/modules/$kernel_release/kernel"
+          mapfile -t installed_modules < <(find "$installed_root" -type f -name '*.ko' | sort)
+          test "${#installed_modules[@]}" -eq 4
+
+          sources=(
+            "$installed_root/drivers/media/rc/msm-geni-ir.ko"
+            "$installed_root/drivers/media/usb/gspca/gspca_main.ko"
+            "$installed_root/drivers/staging/qcacld-3.0/wlan.ko"
+            "$installed_root/drivers/video/backlight/lcd.ko"
+          )
+          targets=(
+            msm-geni-ir.ko
+            gspca_main.ko
+            qca_cld3_wlan.ko
+            lcd.ko
+          )
+
+          package_dir="$MODULES_PACKAGE/vendor/lib/modules"
+          mkdir -p "$package_dir"
+          for index in "${!sources[@]}"; do
+            source_module=${sources[$index]}
+            target_module="$package_dir/${targets[$index]}"
+            test -s "$source_module"
+            cp "$source_module" "$target_module"
+
+            vermagic=$(modinfo -F vermagic "$target_module")
+            test "${vermagic%% *}" = "$kernel_release"
+            test -n "$(modinfo -F signer "$target_module")"
+            test "$(modinfo -F sig_hashalgo "$target_module")" = sha512
+          done
+
+          depmod_root="$RUNNER_TEMP/droidspaces-depmod"
+          depmod_dir="$depmod_root/lib/modules/$kernel_release"
+          rm -rf "$depmod_root"
+          mkdir -p "$depmod_dir"
+          cp "$package_dir"/*.ko "$depmod_dir/"
+          depmod -b "$depmod_root" "$kernel_release"
+
+          sed -E \
+            -e 's#^([^:]+\.ko):#/vendor/lib/modules/\1:#' \
+            -e 's# ([^ ]+\.ko)# /vendor/lib/modules/\1#g' \
+            "$depmod_dir/modules.dep" > "$package_dir/modules.dep"
+          cp "$depmod_dir/modules.alias" "$package_dir/modules.alias"
+          cp "$depmod_dir/modules.softdep" "$package_dir/modules.softdep"
+
+          test "$(find "$package_dir" -maxdepth 1 -type f -name '*.ko' | wc -l)" -eq 4
+          grep -Fqx '/vendor/lib/modules/qca_cld3_wlan.ko:' "$package_dir/modules.dep"
+          if grep -Eq '(^|/)br_netfilter\.ko|(^|/)wlan\.ko' "$package_dir/modules.dep"; then
+            echo "modules.dep contains a stale module name" >&2
+            exit 1
+          fi
+
+          {
+            echo "kernel_release=$kernel_release"
+            for target in "${targets[@]}"; do
+              module="$package_dir/$target"
+              echo "module=$target"
+              echo "vermagic=$(modinfo -F vermagic "$module")"
+              echo "signer=$(modinfo -F signer "$module")"
+              echo "sig_key=$(modinfo -F sig_key "$module")"
+              echo "sig_hashalgo=$(modinfo -F sig_hashalgo "$module")"
+              echo "sha256=$(sha256sum "$module" | cut -d' ' -f1)"
+            done
+          } > "$ARTIFACT_DIR/module-manifest.txt"
+
       - name: Assemble guacamole AnyKernel3 package
         shell: bash
         run: |
@@ -150,8 +230,11 @@ jobs:
           find "$AK3_DIR" -maxdepth 1 -type f \
             \( -name 'Image*' -o -name 'zImage*' -o -name 'dtb*' -o -name 'dtbo*' \) \
             -delete
+          rm -rf "$AK3_DIR/modules"
           cp .github/ak3/anykernel.sh "$AK3_DIR/anykernel.sh"
           cp "$OUT_DIR/arch/arm64/boot/Image-dtb" "$AK3_DIR/Image-dtb"
+          mkdir -p "$AK3_DIR/modules"
+          cp -a "$MODULES_PACKAGE/vendor" "$AK3_DIR/modules/vendor"
           chmod 0755 "$AK3_DIR/anykernel.sh"
           rm -rf "$AK3_DIR/.git"
 
@@ -165,6 +248,18 @@ jobs:
           unzip -Z1 "$zip_path" | grep -Fqx 'Image-dtb'
           unzip -Z1 "$zip_path" | grep -Fqx 'anykernel.sh'
           unzip -Z1 "$zip_path" | grep -Fqx 'tools/ak3-core.sh'
+          unzip -p "$zip_path" anykernel.sh | grep -Fqx 'do.modules=1'
+          test "$(unzip -Z1 "$zip_path" | grep -Ec '^modules/vendor/lib/modules/.*\.ko$')" -eq 4
+          for module in msm-geni-ir.ko gspca_main.ko qca_cld3_wlan.ko lcd.ko; do
+            unzip -Z1 "$zip_path" | grep -Fqx "modules/vendor/lib/modules/$module"
+          done
+          for metadata in modules.dep modules.alias modules.softdep; do
+            unzip -Z1 "$zip_path" | grep -Fqx "modules/vendor/lib/modules/$metadata"
+          done
+          if unzip -Z1 "$zip_path" | grep -Eq '(^|/)(signing_key|.*private.*)\.(pem|key)$'; then
+            echo "AK3 package contains private signing material" >&2
+            exit 1
+          fi
 
       - name: Record provenance and checksums
         shell: bash
@@ -174,6 +269,9 @@ jobs:
             echo "kernel_commit=$GITHUB_SHA"
             echo "kernel_defconfig=lineage_sm8150_defconfig"
             echo "kernel_image=Image-dtb"
+            echo "kernel_release=$(cat "$ARTIFACT_DIR/kernel-release.txt")"
+            echo "kernel_modules=msm-geni-ir.ko,gspca_main.ko,qca_cld3_wlan.ko,lcd.ko"
+            echo "module_install=AnyKernel3 ak3-helper Magisk module"
             echo "clang_repository=$CLANG_REPOSITORY"
             echo "clang_commit=$CLANG_COMMIT"
             echo "anykernel3_repository=$AK3_REPOSITORY"
@@ -182,7 +280,8 @@ jobs:
           } > "$ARTIFACT_DIR/build-provenance.txt"
           (
             cd "$ARTIFACT_DIR"
-            sha256sum Image-dtb resolved.config *.zip > SHA256SUMS
+            sha256sum Image-dtb resolved.config kernel-release.txt \
+              module-manifest.txt *.zip > SHA256SUMS
           )
 
       - name: Upload build artifacts
@@ -205,4 +304,5 @@ jobs:
           path: |
             ${{ env.OUT_DIR }}/.config
             ${{ env.ARTIFACT_DIR }}/build.log
+            ${{ env.ARTIFACT_DIR }}/modules-install.log
             ${{ env.ARTIFACT_DIR }}/resolved.config

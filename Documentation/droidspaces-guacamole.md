@@ -74,11 +74,27 @@ The workflow performs these gates in order:
 2. require the resolved namespaces, cgroups, seccomp, OverlayFS, bridge/veth
    and netfilter options to be built in;
 3. compile `Image-dtb` and the configured kernel modules;
-4. replace the upstream AnyKernel3 device script with the repository-owned
+4. install and sign the four loadable modules with the same generated key
+   embedded in that kernel, verify their `vermagic`, and rename `wlan.ko` to
+   the device-facing `qca_cld3_wlan.ko`;
+5. replace the upstream AnyKernel3 device script with the repository-owned
    `.github/ak3/anykernel.sh` restricted to `guacamole` / `OnePlus7Pro`;
-5. package only `Image-dtb`, leaving the existing DTBO partition unchanged;
-6. upload the AK3 ZIP, raw `Image-dtb`, resolved `.config`, build log,
-   provenance and SHA-256 checksums as workflow artifacts.
+6. package `Image-dtb` plus the matching modules under
+   `modules/vendor/lib/modules`, leaving the existing DTBO partition
+   unchanged;
+7. upload the AK3 ZIP, raw `Image-dtb`, resolved `.config`, module manifest,
+   build logs, provenance and SHA-256 checksums as workflow artifacts.
+
+The AK3 package requires an existing Magisk installation and a Magisk-patched
+active boot image. Installation aborts before repacking or flashing when either
+condition is missing. AnyKernel3 installs the matching modules through its
+systemless `ak3-helper` Magisk module, so the kernel and modules from one
+workflow run must be installed and rolled back as a single unit. Restoring an
+older boot image also requires removing or disabling `ak3-helper`. The
+preflight checks prevent AnyKernel3's known "skip modules but flash the
+kernel" path; they do not make writes to the boot partition and `/data`
+strictly transactional, so a known-good boot image and recovery path remain
+mandatory.
 
 Every candidate must complete the workflow successfully before its packaging
 can be treated as build-validated. A device flash and `droidspaces check`
