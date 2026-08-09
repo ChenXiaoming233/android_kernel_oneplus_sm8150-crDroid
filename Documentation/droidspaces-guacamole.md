@@ -20,6 +20,12 @@ OverlayFS, veth/bridge and netfilter features required by the current
 The cgroup v2 file-prefix compatibility change is adapted from Droidspaces'
 [`02.fix_restore cgroup file prefix handling .patch`](https://github.com/ravindu644/Droidspaces-OSS/blob/main/Documentation/resources/kernel-patches/non-GKI/02.fix_restore%20cgroup%20file%20prefix%20handling%20.patch).
 
+The duplicate `OPLUS_SHORT_C_BATT_CHECK`, `OPLUS_SHORT_IC_CHECK` and
+`OPLUS_SHORT_HW_CHECK` declarations are removed from the nested Oplus Kconfig.
+Their original `tristate` definitions in `drivers/power/Kconfig` remain the
+authoritative definitions, avoiding type-redefinition warnings without
+changing the resolved device configuration.
+
 The companion `xt_qtaguid` patch is intentionally not applied because this
 kernel baseline does not contain `net/netfilter/xt_qtaguid.c`. Reintroducing
 that removed implementation solely to apply the patch would be incorrect.
@@ -74,7 +80,7 @@ The workflow performs these gates in order:
 6. upload the AK3 ZIP, raw `Image-dtb`, resolved `.config`, build log,
    provenance and SHA-256 checksums as workflow artifacts.
 
-The first successful workflow run is still required before the packaging can
-be treated as build-validated. A device flash and `droidspaces check` runtime
-validation are separate gates. Back up the current boot image and retain a
-known-good recovery path before flashing the AK3 package.
+Every candidate must complete the workflow successfully before its packaging
+can be treated as build-validated. A device flash and `droidspaces check`
+runtime validation are separate gates. Back up the current boot image and
+retain a known-good recovery path before flashing the AK3 package.
