@@ -42,13 +42,14 @@ done;
 
 dump_boot;
 
+[ -x "$home/tools/magiskboot" ] || abort "AK3 magiskboot tool is missing. Aborting...";
 ui_print "Checking active boot ramdisk for Magisk...";
-tools/magiskboot cpio "$split_img/ramdisk.cpio" test;
+"$home/tools/magiskboot" cpio "$split_img/ramdisk.cpio" test;
 magisk_status=$?;
 ui_print "Magisk ramdisk test exit code: $magisk_status";
 
 for marker in .backup/.magisk init.magisk.rc overlay/init.magisk.rc; do
-  tools/magiskboot cpio "$split_img/ramdisk.cpio" "exists $marker" >/dev/null 2>&1;
+  "$home/tools/magiskboot" cpio "$split_img/ramdisk.cpio" "exists $marker" >/dev/null 2>&1;
   marker_status=$?;
   if [ "$marker_status" -eq 0 ]; then
     ui_print "Magisk marker present: $marker";
@@ -58,7 +59,7 @@ for marker in .backup/.magisk init.magisk.rc overlay/init.magisk.rc; do
 done;
 
 for legacy in sbin/launch_daemonsu.sh sbin/su init.xposed.rc boot/sbin/launch_daemonsu.sh; do
-  tools/magiskboot cpio "$split_img/ramdisk.cpio" "exists $legacy" >/dev/null 2>&1;
+  "$home/tools/magiskboot" cpio "$split_img/ramdisk.cpio" "exists $legacy" >/dev/null 2>&1;
   legacy_status=$?;
   if [ "$legacy_status" -eq 0 ]; then
     ui_print "Legacy root marker present: $legacy";
