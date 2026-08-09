@@ -96,6 +96,11 @@ kernel" path; they do not make writes to the boot partition and `/data`
 strictly transactional, so a known-good boot image and recovery path remain
 mandatory.
 
+When the ramdisk check fails, the installer log records the `magiskboot cpio
+test` exit code plus the presence of Magisk and legacy-root markers. This is a
+diagnostic-only report; it does not relax the Magisk requirement or proceed to
+write the boot partition.
+
 Every candidate must complete the workflow successfully before its packaging
 can be treated as build-validated. A device flash and `droidspaces check`
 runtime validation are separate gates. Back up the current boot image and
