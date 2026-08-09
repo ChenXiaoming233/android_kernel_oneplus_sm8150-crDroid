@@ -35,6 +35,7 @@ jobs:
       CLANG_TRIPLE: aarch64-linux-gnu-
       CROSS_COMPILE: aarch64-linux-gnu-
       CROSS_COMPILE_ARM32: arm-linux-gnueabi-
+      LLVM: "1"
       LLVM_IAS: "1"
       KBUILD_BUILD_USER: droidspaces
       KBUILD_BUILD_HOST: github-actions
@@ -117,8 +118,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          make O="$OUT_DIR" lineage_sm8150_defconfig
-          make O="$OUT_DIR" olddefconfig
+          make O="$OUT_DIR" CC="$CC" lineage_sm8150_defconfig
+          make O="$OUT_DIR" CC="$CC" olddefconfig
           scripts/verify-droidspaces-config.sh "$OUT_DIR/.config"
           cp "$OUT_DIR/.config" "$ARTIFACT_DIR/resolved.config"
 
@@ -127,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           jobs=$(nproc)
-          make O="$OUT_DIR" -j"$jobs" Image-dtb modules \
+          make O="$OUT_DIR" CC="$CC" -j"$jobs" Image-dtb modules \
             2>&1 | tee "$ARTIFACT_DIR/build.log"
           image="$OUT_DIR/arch/arm64/boot/Image-dtb"
           test -s "$image"
