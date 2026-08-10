@@ -52,6 +52,18 @@ line survives Kconfig dependency resolution. This adaptation has passed that
 static configuration audit. The CI build repeats the audit with
 `scripts/verify-droidspaces-config.sh` before compiling the kernel.
 
+### UFW and Fail2ban support
+
+The non-GKI configuration also enables the optional legacy iptables capabilities
+documented by Droidspaces for running UFW or Fail2ban inside a NAT-mode
+container. This includes `recent`, ipset `hash:ip`/`hash:net`, `xt_set`, NFLOG,
+NFQUEUE, and the required match/target modules. This kernel tree uses
+`CONFIG_IP_NF_TARGET_MASQUERADE` for the IPv4 MASQUERADE target and
+`CONFIG_NF_CT_NETLINK` for the older tree's conntrack netlink symbol; the
+generic `CONFIG_NETFILTER_XT_TARGET_MASQUERADE`, `CONFIG_NF_CONNTRACK_NETLINK`
+and obsolete ULOG symbols do not exist in this tree and are not added as
+unknown configuration entries.
+
 ## GitHub Actions build and AnyKernel3 packaging
 
 The `.github/workflows/build-droidspaces-ak3.yml` workflow builds this branch
