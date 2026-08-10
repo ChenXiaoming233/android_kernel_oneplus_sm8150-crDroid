@@ -1,9 +1,6 @@
 name: Build Droidspaces AnyKernel3 package
 
 on:
-  push:
-    branches:
-      - droidspaces/crdroid-10.11-guacamole
   workflow_dispatch:
 
 permissions:
