@@ -14,7 +14,7 @@
 | cgroup 前缀兼容 | 已修改 | `kernel/cgroup/cgroup.c` 的兼容链接。 |
 | AK3 构建、签名模块打包 | 已实现 | `.github/workflows/build-droidspaces-ak3.yml` 与 `.github/ak3/anykernel.sh`。 |
 | 内核和基础 Droidspaces 运行 | 已真机验证 | 已刷入 `61a12d4d9554` 构建；系统开机、Droidspaces 自检、Wi-Fi 和 NAT 容器网络均通过。 |
-| UFW / Fail2ban 所需 netfilter 扩展 | 已提交，未以该提交完成真机验证 | `412cae350847` 晚于当前设备所运行的 `61a12d4d9554`。 |
+| UFW / Fail2ban 所需 netfilter 扩展 | 已 CI 与真机验证 | `412cae350847` 已包含在 `a8ae93b652f2` 构建和本次设备验证中。 |
 | Ubuntu 24 容器 | 已运行验证 | `Container-Home` 的 systemd、NAT、DNS、外网连通性和 SSH 已验证。 |
 
 本文不改变 ROM 的 userspace、Droidspaces APK 或容器 rootfs，也不承诺让
@@ -189,9 +189,18 @@ Oplus Kconfig 又以不同类型重复定义，会造成 type-redefinition 警�
 尤其是 NAT 容器中错误的 `FORWARD`/`INPUT` 规则可能切断容器自身网络。首次
 启用时应在容器中先用 `iptables-save` 备份规则，并保留 ADB 作为带外恢复通道。
 
-截至本文对应的设备验证，真机运行的是早于该提交的 `61a12d4d9554`。所以必须
-重新刷入包含 `412cae350847` 的 AK3 包后，才能把 UFW/Fail2ban 标记为真机验证
-通过；仅看 defconfig 或 CI 成功均不等于实际规则可用。
+本次最终验证使用适配分支 `a8ae93b652f2` 的手动 workflow run
+[`31879782976`](https://github.com/ChenXiaoming233/android_kernel_oneplus_sm8150-crDroid/actions/runs/31879782976)，
+运行结论为 success，生成内核版本 `4.14.355-perf-ga8ae93b652f2`。对应 artifact
+为 `droidspaces-guacamole-a8ae93b652f25caa7232eea28af6732d27a5a061`，其 GitHub
+artifact digest 为 `sha256:47cba91afcea43ca21f0fcfef4669a568997c84685c53c233947621eacef8df6`；
+AK3 ZIP 在 artifact 内的 SHA256 为
+`c4af90ee6ed0db5c30ce0aaec5a6f0cc5b4da3215fd8de4c86c43b1a60b7055c`。
+
+该构建包含 `412cae350847` 的 netfilter/ipset 配置，并已在真机上的 Droidspaces
+容器完成 UFW/Fail2ban 实际规则验证，结果成功。此前 `61a12d4d9554` 的基础
+容器验证仍作为历史记录保留；仅看 defconfig 或 CI 成功均不等于实际规则可用。
+Artifact 默认保留 14 天，应在刷写或发布前下载并保存校验文件。
 
 ## 6. 编译、CI 与可复现性
 
@@ -255,6 +264,24 @@ Droidspaces 内核适配代码。
 
 这解决了“内核已刷入但 Wi-Fi 模块仍来自旧内核”的高风险路径。它不能跨构建
 复用模块，也不能将 AK3 中的模块替换为从其他内核包提取的版本。
+
+### 6.3 外部参考与依赖
+
+本项目的 workflow 文件由本 fork 在提交 `554d05865592` 中首次新增，后续在本
+仓库内逐步加入工具链选择、签名模块校验、Magisk 预检和手动触发逻辑。当前 Git
+历史未记录从上游 `14.0` 或其他仓库直接复制完整 workflow 的来源；实现中仍明确
+使用以下公开组件和参考资料：
+
+| 类型 | 来源 | 用途 |
+| --- | --- | --- |
+| CI Action | `actions/checkout@v4`、`actions/cache@v4`、`actions/upload-artifact@v4` | checkout、工具链/ccache 缓存和构建产物上传。 |
+| 编译器 | [crDroid Clang 仓库](https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r487747c) 的 `19f5a09ce1b016b21a6ead1ed5d84c816586ebb6` | 固定编译器输入。 |
+| AK3 框架 | [classified/AnyKernel3](https://github.com/classified/AnyKernel3) 的 `9b319a806d36be2ea2eca8bad85bff0e03ce784f` | 在设备上保留现有 ramdisk 并替换内核。 |
+| 适配参考 | [Droidspaces Non-GKI Kernel Configuration](https://github.com/ravindu644/Droidspaces-OSS/blob/main/Documentation/zh-CN/Kernel-Configuration.md#non-gki) | 将容器需求映射到本树 Linux 4.14 Kconfig。 |
+
+上述项目提供的是工具、框架或配置参考；guacamole 设备检查、resolved config
+门槛、签名模块配套、AK3/Magisk 预检和 artifact 校验属于本 fork 的定制逻辑。
+修改这些外部依赖的版本或提交时，应视为一次独立的构建与真机回归变更。
 
 ## 7. AnyKernel3 与 Magisk 模块机制
 
@@ -326,7 +353,18 @@ boot 镜像，并保留 fastboot/recovery 恢复路径。
 这些结果证明基础容器、网络命名空间、NAT、配套模块和 Android 启动链在该提交上
 共同工作；它们不是对 `412cae350847` 防火墙扩展的验证。
 
-### 8.2 Ubuntu 版本经验
+### 8.2 UFW / Fail2ban 真机验证
+
+最终 artifact 的 resolved config 已确认包含 `NETFILTER_XT_MATCH_RECENT`、
+`NETFILTER_XT_MATCH_HL`、`NETFILTER_NETLINK_LOG`、`NETFILTER_NETLINK_QUEUE`、
+`NETFILTER_XT_TARGET_NFLOG`、`IP_SET`、`IP_SET_HASH_IP`、`IP_SET_HASH_NET` 和
+`NETFILTER_XT_SET`，且对应四个内核模块与 `vermagic`、签名校验通过。
+
+在该版本真机容器中，UFW/Fail2ban 已完成实际启用与规则验证，容器网络未因
+`FORWARD`/NAT 规则被意外切断。后续若修改防火墙配置或模块列表，仍需重复规则
+加载、容器转发、外网连通和回滚测试。
+
+### 8.3 Ubuntu 版本经验
 
 曾在较新的 Ubuntu rootfs 上遇到 PID 1 与 `/dev/console` 相关的启动阻塞风险。
 这不能仅凭一次现象就归因为“Linux 4.14 绝对不支持 Ubuntu 26”，但说明较新的
@@ -377,8 +415,8 @@ su -c /data/local/Droidspaces/bin/droidspaces --name=Container-Home run /bin/sh 
 ```
 
 随后分别验证 Wi-Fi、移动网络、相机/音频等日常硬件、容器 DNS 与外网、Docker、
-以及休眠/重启。若刷入包含 `412cae350847` 的版本，还应在容器内进行最小 UFW 或
-Fail2ban 规则测试，并确认 NAT 未被 `FORWARD` 规则意外阻断。
+以及休眠/重启。对包含 `412cae350847` 的版本，还应重复容器内 UFW/Fail2ban
+规则加载和 NAT 转发回归；本次 `a8ae93b652f2` artifact 的该项验证已经完成。
 
 ## 10. 风险、回滚与后续维护
 
