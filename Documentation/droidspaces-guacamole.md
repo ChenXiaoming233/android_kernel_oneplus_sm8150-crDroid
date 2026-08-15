@@ -37,7 +37,7 @@ Non-GKI 路径所需的内核接口，并将内核镜像与其可加载模块作
 | 内核家族 | Qualcomm SM8150，Linux 4.14，Non-GKI |
 | 设备 defconfig | `arch/arm64/configs/lineage_sm8150_defconfig` |
 | 适配分支 | `droidspaces/crdroid-10.11-guacamole` |
-| 本文对应的分支 HEAD | `412cae3508478c249dba1b6ac11fd836c941ea38` |
+| 本文对应的分支 HEAD | `a8ae93b652f2`（文档与手动 workflow 入口提交） |
 | 已刷入并开机的提交 | `61a12d4d9554` |
 | 已见真机内核版本 | `4.14.355-perf-g61a12d4d9554` |
 
@@ -223,9 +223,15 @@ Ubuntu 22.04 x86_64 runner 上构建，并固定外部输入：
 - `SHA256SUMS`。
 
 工作流只接受 `workflow_dispatch` 手动触发；向任何分支 push commit 均不会启动
-构建。GitHub 网页的 **Run workflow** 入口要求该 workflow 文件存在于仓库默认
-分支。若默认分支没有该文件，应先将这份 workflow 同步到默认分支；仅推送到
-适配分支不足以获得手动触发入口。
+构建。为让 GitHub 网页显示 **Run workflow** 入口，默认分支 `14.0` 已通过
+workflow-only 提交 `220bb50ea23e` 同步这份 workflow。该提交只提供入口，不包含
+Droidspaces 内核适配代码。
+
+在 **Run workflow** 页面必须将分支选择为
+`droidspaces/crdroid-10.11-guacamole`。工作流中的 `actions/checkout` 使用手动
+运行事件选择的 ref：选择 `14.0` 会构建上游基线，选择适配分支才会构建本文
+记录的配置、cgroup、AK3 和模块改动。运行完成后，应根据 artifact 中的
+`build-provenance.txt` 和 `SHA256SUMS` 核对实际源码提交与文件完整性。
 
 ### 6.2 模块为何必须打包
 
