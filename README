@@ -1,3 +1,28 @@
+crDroid OnePlus 7 Pro Droidspaces Fork
+=======================================
+
+这是面向 OnePlus 7 Pro (`guacamole`) 的 crDroid Android 14 内核 fork。默认
+分支 `14.0` 保持接近上游，并提供可从 GitHub Actions 手动启动的 AK3 构建
+workflow；Droidspaces 所需的内核适配位于
+[`droidspaces/crdroid-10.11-guacamole`](https://github.com/ChenXiaoming233/android_kernel_oneplus_sm8150-crDroid/tree/droidspaces/crdroid-10.11-guacamole)
+分支。
+
+该 fork 相对 `crdroidandroid/android_kernel_oneplus_sm8150:14.0` 的改动限定为
+Droidspaces Non-GKI 容器能力、cgroup 文件名兼容、AK3 与匹配签名模块打包、
+防火墙所需的 netfilter 配置，以及相应的 CI 与文档。它不是通用内核发行版；
+仅应在已备份 boot image、已安装 Magisk 的 `guacamole` / crDroid 10.11 Android
+14 设备上使用对应分支构建的 AK3 包。
+
+## Droidspaces 使用与维护
+
+- [Droidspaces 适配、构建、刷写与回滚说明](https://github.com/ChenXiaoming233/android_kernel_oneplus_sm8150-crDroid/blob/droidspaces/crdroid-10.11-guacamole/Documentation/droidspaces-guacamole.md)
+- [macOS 大小写不敏感文件系统维护说明](Documentation/macos-case-insensitive-filesystem.md)
+
+在 Actions 页面运行 `Build Droidspaces AnyKernel3 package` 时，请选择
+`droidspaces/crdroid-10.11-guacamole` 分支。选择默认 `14.0` 分支只会构建上游
+基线，不包含 Droidspaces 适配。workflow 仅支持手动触发；请在刷写前校验
+artifact 的 `SHA256SUMS`，并遵循适配文档中的 Magisk、模块配套和回滚要求。
+
 Linux kernel
 ============
 
